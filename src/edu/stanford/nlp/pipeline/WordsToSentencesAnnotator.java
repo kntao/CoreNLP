@@ -207,6 +207,9 @@ public class WordsToSentencesAnnotator implements Annotator  {
     // section annotations to mark sentences with
     CoreMap sectionAnnotations = null;
     List<CoreMap> sentences = new ArrayList<>();
+    // keep track of current section to assign sentences to sections
+    int currSectionIndex = 0;
+    List<CoreMap> sections = annotation.get(CoreAnnotations.SectionsAnnotation.class);
     for (List<CoreLabel> sentenceTokens: wts.process(tokens)) {
       if (countLineNumbers) {
         ++lineNumber;
@@ -256,6 +259,32 @@ public class WordsToSentencesAnnotator implements Annotator  {
       String sectionEnd = sentenceEndToken.get(CoreAnnotations.SectionEndAnnotation.class);
       if (sectionEnd != null) {
         sectionAnnotations = null;
+      }
+
+      // determine section index for this sentence if keeping track of sections
+      // try to find a section that ends after this sentence ends, check if it encloses sentence
+      // if it doesn't, that means this sentence is in two section
+      while (currSectionIndex < sections.size()) {
+        int currSectionCharBegin = sections.get(currSectionIndex).get(
+              CoreAnnotations.CharacterOffsetBeginAnnotation.class);
+        int currSectionCharEnd = sections.get(currSectionIndex).get(
+              CoreAnnotations.CharacterOffsetEndAnnotation.class);
+        if (currSectionCharEnd < end) {
+          currSectionIndex++;
+          continue;
+        } else {
+          // check if this sentence fits in the candidate section
+          if (currSectionCharBegin <= begin) {
+            // add sentence to section list
+            sections.get(currSectionIndex).get(CoreAnnotations.SentencesAnnotation.class).add(sentence);
+            // set sentence's section date
+            String sectionDate = sections.get(currSectionIndex).get(CoreAnnotations.SectionDateAnnotation.class);
+            sentence.set(CoreAnnotations.SectionDateAnnotation.class, sectionDate);
+            // set section index
+            sentence.set(CoreAnnotations.SectionIndexAnnotation.class, currSectionIndex);
+          }
+          break;
+        }
       }
 
       if (docID != null) {

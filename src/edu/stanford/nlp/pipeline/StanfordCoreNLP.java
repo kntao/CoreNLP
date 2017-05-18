@@ -481,7 +481,10 @@ public class StanfordCoreNLP extends AnnotationPipeline  {
    * release the memory associated with the annotators.
    */
   public static synchronized void clearAnnotatorPool() {
-    pool = null;
+    logger.warn("Clearing CoreNLP annotation pool; this should be unnecessary in production");
+    if (pool != null) {
+      pool.clear();
+    }
   }
 
 
@@ -532,7 +535,7 @@ public class StanfordCoreNLP extends AnnotationPipeline  {
   public static synchronized AnnotatorPool getDefaultAnnotatorPool(final Properties inputProps, final AnnotatorImplementations annotatorImplementation) {
     // if the pool already exists reuse!
     if (pool == null) {
-      pool = new AnnotatorPool();
+      pool = AnnotatorPool.SINGLETON;
     }
     for (Map.Entry<String, BiFunction<Properties, AnnotatorImplementations, Annotator>> entry : getNamedAnnotators().entrySet()) {
       pool.register(entry.getKey(), inputProps, Lazy.cache( () -> entry.getValue().apply(inputProps, annotatorImplementation)));
@@ -573,7 +576,7 @@ public class StanfordCoreNLP extends AnnotationPipeline  {
    * @return A populated AnnotatorPool
    */
   public static AnnotatorPool constructAnnotatorPool(final Properties inputProps, final AnnotatorImplementations annotatorImplementation) {
-    AnnotatorPool pool = new AnnotatorPool();
+    AnnotatorPool pool = AnnotatorPool.SINGLETON;
     for (Map.Entry<String, BiFunction<Properties, AnnotatorImplementations, Annotator>> entry : getNamedAnnotators().entrySet()) {
       pool.register(entry.getKey(), inputProps, Lazy.cache(() -> entry.getValue().apply(inputProps, annotatorImplementation)));
     }
@@ -1167,7 +1170,7 @@ public class StanfordCoreNLP extends AnnotationPipeline  {
           if (ex == null) {
             try{
             //--Output File
-	      OutputStream fos = new BufferedOutputStream(new FileOutputStream(finalOutputFilename));
+	            OutputStream fos = new BufferedOutputStream(new FileOutputStream(finalOutputFilename));
               print.accept(finishedAnnotation, fos);
               fos.close();
             } catch(IOException e) {
@@ -1179,6 +1182,9 @@ public class StanfordCoreNLP extends AnnotationPipeline  {
               if (totalProcessed.intValue() % 1000 == 0) {
                 logger.info("Processed " + totalProcessed + " documents");
               }
+              // check we've processed or errored on every file, if so tell the pool to clear()
+              if ((totalProcessed.intValue() + totalErrorAnnotating.intValue()) == files.size())
+                pool.clear();
             }
           } else if (continueOnAnnotateError) {
             // Error annotating but still wanna continue
@@ -1186,9 +1192,14 @@ public class StanfordCoreNLP extends AnnotationPipeline  {
             logger.err("Error annotating " + file.getAbsoluteFile() + ": " + ex);
             synchronized (totalErrorAnnotating) {
               totalErrorAnnotating.incValue(1);
+              // check we've processed or errored on every file, if so tell the pool to clear()
+              if ((totalProcessed.intValue() + totalErrorAnnotating.intValue()) == files.size())
+                pool.clear();
             }
 
           } else {
+            // if stopping due to error, make sure to clear the pool
+            pool.clear();
             throw new RuntimeException("Error annotating " + file.getAbsoluteFile(), ex);
           }
         });
@@ -1350,9 +1361,12 @@ public class StanfordCoreNLP extends AnnotationPipeline  {
       }
 
     }
-//    pipeline.run();
-//    pool.clear();
 
+
+    pipeline.run();
+    // clear the pool if not running in multi-thread mode
+    if (!props.containsKey("threads") || Integer.parseInt(props.getProperty("threads")) <= 1)
+      pool.clear();
   }
 
 }
